@@ -12,7 +12,10 @@ panels.
 ![DVC](https://img.shields.io/badge/data-DVC-945DD6)
 ![pytest](https://img.shields.io/badge/tests-pytest-0A9EDC)
 ![MLflow](https://img.shields.io/badge/tracking-MLflow-0194E2)
-![Stage](https://img.shields.io/badge/stage%202-complete-brightgreen)
+![FastAPI](https://img.shields.io/badge/API-FastAPI-009688)
+![Docker](https://img.shields.io/badge/container-Docker-2496ED)
+![Kubernetes](https://img.shields.io/badge/deploy-Kubernetes-326CE5)
+![Stage](https://img.shields.io/badge/stage%203-complete-brightgreen)
 
 ---
 
@@ -30,7 +33,7 @@ panels.
 - [Model training and MLflow](#model-training-and-mlflow)
 - [Configuration](#configuration)
 - [Testing](#testing)
-- [Service and deployment specification](#service-and-deployment-specification)
+- [Prediction service](#prediction-service)
 - [Monitoring and retraining plan](#monitoring-and-retraining-plan)
 - [Contributing](#contributing)
 
@@ -116,11 +119,21 @@ flowchart LR
 │       ├── cleaning.py           # fixes them, writes the cleaned dataset
 │       ├── model.py              # preprocessing + regressor pipeline
 │       ├── train.py              # MLflow runs, registers v1 as @champion
-│       └── evaluate.py           # MAE, MAE per area, model loading
+│       ├── evaluate.py           # MAE, MAE per area, model loading
+│       └── logging_utils.py      # one JSON log line per record, to stdout
+├── app/
+│   ├── __init__.py
+│   └── main.py                   # FastAPI: GET /health, POST /predict
 ├── tests/
 │   ├── conftest.py
 │   ├── test_data_checks.py       # data checks and cleaning
-│   └── test_model.py             # pipeline, MAE and training logic
+│   ├── test_model.py             # pipeline, MAE and training logic
+│   └── test_api.py               # TestClient: endpoints, client rules, logs
+├── Dockerfile                    # python:3.12-slim image mp003-api:1.0
+├── .dockerignore
+├── k8s/
+│   ├── deployment.yaml           # mp003-api, 3 replicas, probes on /health
+│   └── service.yaml              # mp003-svc, port 80 -> 8000
 ├── mlflow.db                     # MLflow tracking + model registry (SQLite)
 ├── models/
 │   └── model.joblib              # the @champion pipeline the API loads
@@ -131,8 +144,7 @@ flowchart LR
     └── findings.yaml             # the form read by the marking tool
 ```
 
-Still to come from later stages: `app/main.py`, `Dockerfile`,
-`.dockerignore`, `k8s/deployment.yaml`, `k8s/service.yaml` and
+Still to come in Stage 4: `src/solar_ml/monitoring.py` and
 `predictions/holdout_predictions.csv`.
 
 ## Dataset
@@ -287,21 +299,80 @@ pytest -q
 The suite builds small synthetic datasets inside each test, so it runs without
 the CSVs (as CI requires). It covers all seven detectors, including the two
 problems absent from our data, an end-to-end cleaning run, the model
-pipeline, the MAE helpers and candidate selection. GitHub Actions runs it on
-every push.
+pipeline, the MAE helpers, candidate selection, and the API through FastAPI's
+`TestClient` (a tiny model is trained inside the test). GitHub Actions runs it
+on every push.
 
-## Service and deployment specification
+## Prediction service
 
-To be implemented in Stage 3, from [`PROBLEM.md`](PROBLEM.md):
+`app/main.py` serves the `@champion` model from `models/model.joblib`
+(override with the `MODEL_PATH` environment variable).
 
-| Item | Requirement |
+| Endpoint | Returns |
 | --- | --- |
-| `POST /predict` | Body has exactly: `panel_area_m2`, `sunshine_hours`, `temp_c`, `dust_days`, `panel_age_yr`, `cloud_cover_pct`, `roof_type`, `area` |
-| Validation | `panel_age_yr` ≤ 30 and `temp_c` ≥ 6, enforced in the pydantic schema (HTTP 422 otherwise) |
-| `GET /health` | Returns `{"status": "ok"}` |
-| Docker image | `mp003-api:1.0`, `python:3.12-slim`, port 8000 |
-| Kubernetes | Deployment `mp003-api` (3 replicas), Service `mp003-svc` port 80 → 8000 |
-| Probes | Readiness and liveness on `/health`; liveness waits longer |
+| `GET /health` | `{"status": "ok", "model_loaded": true}` |
+| `POST /predict` | `{"prediction": 27.365, "unit": "kWh"}` |
+
+The request body must have exactly these eight fields: `panel_area_m2`,
+`sunshine_hours`, `temp_c`, `dust_days`, `panel_age_yr`, `cloud_cover_pct`,
+`roof_type`, `area`. The client's two rules sit in the pydantic schema, so a bad
+request gets **HTTP 422** and never reaches the model:
+
+| Rule | Schema |
+| --- | --- |
+| `panel_age_yr` above 30 is impossible | `Field(..., le=30)` |
+| `temp_c` below 6 is a typing mistake | `Field(..., ge=6)` |
+
+Missing fields, extra fields (`extra="forbid"`) and wrong types also give 422.
+If the model file is missing, `/predict` answers 503.
+
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port 8000      # open http://localhost:8000/docs
+curl -X POST localhost:8000/predict -H "Content-Type: application/json" \
+  -d '{"panel_area_m2":34.5,"sunshine_hours":7.2,"temp_c":31,"dust_days":12,"panel_age_yr":6.5,"cloud_cover_pct":40,"roof_type":"flat","area":"Old City"}'
+```
+
+### Logging
+
+`src/solar_ml/logging_utils.py` writes **one JSON line per prediction** to
+stdout (never to a file), with the prediction, latency and non-personal panel
+details:
+
+```json
+{"timestamp": "2026-11-26T16:04:45.132+00:00", "level": "INFO", "logger": "mp003-api", "message": "prediction", "event": "prediction", "prediction_kwh": 27.365, "latency_ms": 5.72, "roof_type": "flat", "area": "Old City", "panel_area_m2": 34.5, "panel_age_yr": 6.5}
+```
+
+### Docker
+
+```bash
+docker build -t mp003-api:1.0 .
+docker run -p 8000:8000 mp003-api:1.0
+```
+
+`python:3.12-slim`; `requirements.txt` is copied and installed **before** the
+code so the dependency layer is cached; runs as a non-root user; `EXPOSE 8000`;
+uvicorn on `0.0.0.0:8000`. `.dockerignore` keeps data, MLflow files, tests and
+git history out of the image.
+
+### Kubernetes
+
+```bash
+kubectl apply -f k8s/
+kubectl get pods -l app=mp003-api        # 3 pods
+kubectl port-forward svc/mp003-svc 8080:80
+```
+
+| Item | Value |
+| --- | --- |
+| Deployment | `mp003-api`, **3** replicas, image `mp003-api:1.0`, container port 8000 |
+| Service | `mp003-svc`, port 80 → targetPort 8000, selector `app: mp003-api` (matches the pod labels) |
+| Readiness probe | `GET /health`, starts after 5 s, every 10 s |
+| Liveness probe | `GET /health`, starts after 20 s (waits longer), every 20 s |
+
+### CI
+
+`.github/workflows/ci.yml` runs on every push: Python 3.12, `pip install -r
+requirements.txt`, `pytest`.
 
 ## Monitoring and retraining plan
 
