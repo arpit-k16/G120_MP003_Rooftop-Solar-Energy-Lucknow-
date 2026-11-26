@@ -1,0 +1,28 @@
+# Keep the image small: only requirements.txt, params.yaml, src/, app/, models/ are needed
+.git
+.gitignore
+.github/
+.dvc/
+.dvcignore
+.dvc-*/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.env
+
+# Data, experiments and reports are not part of the service
+data/
+mlruns/
+mlartifacts/
+mlflow.db
+reports/
+predictions/
+tests/
+k8s/
+Dockerfile
+.dockerignore
+*.md
+Claude outputs/
+Stage2_All_Members*
