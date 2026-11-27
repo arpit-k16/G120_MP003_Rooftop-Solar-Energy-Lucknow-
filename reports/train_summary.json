@@ -1,0 +1,73 @@
+{
+  "experiment_name": "mp003-solar-energy",
+  "best_run_id": "fead458789d142a4a7e2909c2706c3c9",
+  "registered_model_name": "mp003-solar-energy",
+  "champion_version": 1,
+  "data_sha256": "5c46ec426e4f50f0469d970dee5d671889d90f06b97538f99b5f0221c8f8c3a5",
+  "selected": {
+    "name": "ridge_a1",
+    "type": "ridge",
+    "params": {
+      "alpha": 1.0
+    },
+    "cv_mae": 1.4244556393939607,
+    "cv_mae_std": 0.08919559963311312,
+    "mae_val": 1.5551347364116284
+  },
+  "candidates": [
+    {
+      "name": "ridge_a0.1",
+      "type": "ridge",
+      "params": {
+        "alpha": 0.1
+      },
+      "cv_mae": 1.4245827663029949,
+      "cv_mae_std": 0.08933664775675597,
+      "mae_val": 1.5553656347474407
+    },
+    {
+      "name": "ridge_a1",
+      "type": "ridge",
+      "params": {
+        "alpha": 1.0
+      },
+      "cv_mae": 1.4244556393939607,
+      "cv_mae_std": 0.08919559963311312,
+      "mae_val": 1.5551347364116284
+    },
+    {
+      "name": "ridge_a10",
+      "type": "ridge",
+      "params": {
+        "alpha": 10.0
+      },
+      "cv_mae": 1.4277014970997306,
+      "cv_mae_std": 0.09006691005922884,
+      "mae_val": 1.558398307914212
+    },
+    {
+      "name": "random_forest",
+      "type": "random_forest",
+      "params": {
+        "n_estimators": 300,
+        "max_depth": 10,
+        "min_samples_leaf": 2
+      },
+      "cv_mae": 2.137849127424364,
+      "cv_mae_std": 0.13477959670076867,
+      "mae_val": 2.175439772752553
+    },
+    {
+      "name": "gradient_boosting",
+      "type": "gradient_boosting",
+      "params": {
+        "n_estimators": 300,
+        "learning_rate": 0.05,
+        "max_depth": 3
+      },
+      "cv_mae": 1.6899815692111642,
+      "cv_mae_std": 0.14223165529783718,
+      "mae_val": 1.7303095402389033
+    }
+  ]
+}
